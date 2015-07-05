@@ -1,0 +1,229 @@
+#!/usr/bin/env python3
+#
+# grabtelnet - program to read a telnet console and account timestamps to it.
+#
+# This program is similar to grabserial and the idea is inspired from grabserial
+#
+# Copyright 2015, Subramanian K
+#
+# This program is provided under the Gnu General Public License (GPL)
+# version 2 ONLY. This program is distributed WITHOUT ANY WARRANTY.
+# See the LICENSE file, which should have accompanied this program,
+# for the text of the license.
+#
+# 2015-07-02 by Subramanian K <sububack@gmail.com>
+#
+#
+# CHANGELOG:
+# 2015.07.02 - Version 1.0.0 Add support to connect to telnet console and 
+#	print the output on stdout
+#
+MAJOR_VERSION=1
+MINOR_VERSION=0
+REVISION=0
+
+import os
+import sys
+import getopt
+import telnetlib
+import time
+import re
+
+cmd = os.path.basename(sys.argv[0])
+verbose = 0
+
+def vprint(message):
+	if verbose:
+		print(message)
+
+def usage(ret):
+	print(""" %s : Telnet console characters grabber
+	Usage: %s [options]
+options:
+    -h, --help			Print this message
+    -d, --console=<console-ip>	Set the console ip address
+    -p, --port=<port-number>	Set the console port number (default null)
+    -e, --endtime=<second>	End the program after the given second elapsed.
+    -t, --time			Print time for first character in each line 
+				received by %s.
+    -T, --systime		Same as --time, but print system time.
+    -m, --match=<pattern>	Regular expression patter to match to set
+				basetime. The time will restart from 0 when
+				a successful pattern match occurs.
+    -l, --launchtime       	Set base time from launch of program.
+    -o, --output=<filename>	Output data to the named file.
+    -q, --quiet			Keep the console quite
+    -v, --verbose		Show verbose runtime messages
+    -V, --version		Show version number and exit
+
+Ex: %s -e 10 -t -m "^Linux version.*" -d 192.168.1.1 -p 2003
+This will grab telnet input for 10 second, displaying time for each line and 
+re-setting the base time when the line starting with "Linux version" is seen.
+""" % (cmd, cmd, cmd, cmd))
+	sys.exit(ret)
+
+def main():
+	global verbose
+        # parse the command line options
+	try:
+		opts, args = getopt.getopt(sys.argv[1:],
+			"hld:p:tTm:e:o:qvV:", [
+				"help",
+				"launchtime",
+				"device=",
+				"port=",
+				"time",
+				"systime",
+				"match=",
+				"endtime=",
+				"output=",
+				"verbose",
+				"version"])
+	except:
+                # print help info and exit
+		print("Error parsing command line options")
+		usage(2)
+	console = None
+	ofile = None
+	basestart = ""
+	port_num = 0
+	basetime = 0
+	endtime = 0
+	show_time = 0
+	show_systime = 0
+	quiet = 0
+
+	for opt, arg in opts:
+		if opt in ["-h", "--help"]:
+			usage(0)
+		if opt in ["-d", "--device"]:
+			console = arg
+		if opt in ["-p", "--port"]:
+			port_num = int(arg)
+		if opt in ["-t", "--time"]:
+			show_time=1
+			show_systime=0
+		if opt in ["-T", "--systime"]:
+			show_time=0
+			show_systime=1
+		if opt in ["-m", "--match"]:
+			basestart = arg
+		if opt in ["-l", "--launchtime"]:
+			vprint('setting basetime to time of program launch')
+			basetime = time.time()
+		if opt in ["-e", "--endtime"]:
+			endstr = arg
+			try:
+				endtime = time.time()+float(endstr)
+			except:
+				print("Error: invalid endtime %s specified" % arg)
+				sys.exit(3)
+		if opt in ["-o", "--output"]:
+			ofile = arg
+		if opt in ["-v", "--verbose"]:
+			verbose=1
+		if opt in ["-q", "--quiet"]:
+			quiet = 1
+			verbose=0
+		if opt in ["-V", "--version"]:
+			print("grabtelnet version %d.%d.%d" % (MAJOR_VERSION, MINOR_VERSION, REVISION))
+			sys.exit(0)
+		if endtime:
+			vprint("Program will end in %s second" % endstr)
+		if show_time:
+			vprint("Printing timing information for each line")
+		if show_systime:
+			vprint("Printing absolute timing information for each line")
+		if basestart:
+			vprint("Matching pattern '%s' to set base time" % basestart)
+		if ofile:
+			try:
+				out = open(ofile, "w")
+			except IOError:
+				print("Can't open output file: %s" % ofile)
+				sys.exit(1)
+	prevt = 0
+	linetime = 0
+	newline = 1
+	curline = ""
+
+	vprint("Saving data to '%s'" % ofile)
+	vprint("Existing file contents will be erased...")
+	vprint("Opening telnet connection %s:%s" % (console, port_num))
+	vprint("You can use Control-C to stop...")
+	try:
+		tn = telnetlib.Telnet(console,port_num ,1)
+	except ConnectionRefusedError:
+		print("Telnet line %s:%s already in use" % (console, port_num))
+		sys.exit(1)
+
+	while(1):
+		try:
+			data = tn.read_until(b"\r\n",2).decode('ascii')
+			data.rstrip('\n')
+			#check for timer expiry
+			if endtime and time.time()>endtime:
+				break
+			#if we didn't read anything, need to try again
+			if len(data) == 0:
+				continue
+			if data=="\r":
+				continue
+			if not basetime:
+				basetime = time.time()
+
+			#show time -t
+			if show_time and newline:
+				linetime = time.time()
+				elapsed = linetime-basetime
+				delta = elapsed-prevt
+				msg = "[%4.6f %2.6f] " % (elapsed, delta)
+				if quiet == 0:
+					sys.stdout.write(msg)
+				if ofile:
+					out.write(msg)
+				prevt = elapsed
+				newline = 0
+
+			#system time -T
+			if show_systime and newline:
+				linetime = time.time()
+				linetimestr = time.strftime(
+					'%y-%m-%d %H:%M:%S',
+					time.localtime(linetime))
+				elapsed = linetime-basetime
+				delta = elapsed-prevt
+				msg = "[%s %2.6f] " % (linetimestr, delta)
+				if quiet == 0:
+					sys.stdout.write(msg)
+				if ofile:
+					out.write(msg)
+				prevt = elapsed
+				newline = 0
+
+			#Writing the original data
+			if quiet == 0:
+				sys.stdout.write(data)
+			if ofile:
+				out.write(data)
+			curline += data
+
+			# pattern matching
+			newline = 1
+			if basestart and re.search(basestart, curline):
+				basetime = linetime
+				elapsed = 0
+				prevt = 0
+			curline = ""
+			sys.stdout.flush()
+			if ofile:
+				out.flush()
+
+		#Catch any exception			
+		except Exception as e: 
+			print(e)
+			break
+	tn.close()
+	if ofile:
+		out.close()
+main()
