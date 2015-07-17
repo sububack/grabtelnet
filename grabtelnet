@@ -53,6 +53,7 @@ options:
     -l, --launchtime       	Set base time from launch of program.
     -o, --output=<filename>	Output data to the named file.
     -q, --quiet			Keep the console quite
+    -k, --keystroke		Sends 'enter' keystroke to keep session
     -v, --verbose		Show verbose runtime messages
     -V, --version		Show version number and exit
 
@@ -67,7 +68,7 @@ def main():
         # parse the command line options
 	try:
 		opts, args = getopt.getopt(sys.argv[1:],
-			"hld:p:tTm:e:o:qvV:", [
+			"hld:p:tTm:e:o:qkvV:", [
 				"help",
 				"launchtime",
 				"device=",
@@ -77,6 +78,7 @@ def main():
 				"match=",
 				"endtime=",
 				"output=",
+				"keystroke",
 				"verbose",
 				"version"])
 	except:
@@ -92,6 +94,8 @@ def main():
 	show_time = 0
 	show_systime = 0
 	quiet = 0
+	keystroke = 0
+	keystroke_time = 0
 
 	for opt, arg in opts:
 		if opt in ["-h", "--help"]:
@@ -122,6 +126,9 @@ def main():
 			ofile = arg
 		if opt in ["-v", "--verbose"]:
 			verbose=1
+		if opt in ["-k", "--keystroke"]:
+			keystroke_time=time.time()+float("10")
+			keystroke=1
 		if opt in ["-q", "--quiet"]:
 			quiet = 1
 			verbose=0
@@ -164,10 +171,15 @@ def main():
 			#check for timer expiry
 			if endtime and time.time()>endtime:
 				break
+			if keystroke == 1 and time.time()>keystroke_time:
+				tn.write(b"\n")
+				keystroke_time=time.time()+float("10")
 			#if we didn't read anything, need to try again
 			if len(data) == 0:
 				continue
 			if data=="\r":
+				continue
+			if data=="\r\n":
 				continue
 			if not basetime:
 				basetime = time.time()
